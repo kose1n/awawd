@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.congifmap.postgresql.cronJob }}
+  labels:
+    app: {{ .Values.congifmap.postgresql.cronJob }}
+data:
+  cronjob-postgres.yaml: |
+    apiVersion: batch/v1
+    kind: CronJob
+    metadata:
+      name: {{ .Values.congifmap.postgresql.cronJob }}-${name_Custom_Resource}-${databaseName}
+    spec:
+      schedule: "${backupInterval}"
+      jobTemplate:
+        spec:
+          backoffLimit: 0
+          template:
+            spec:
+              containers:
+              - name: pg-backup-container
+                image: bitnami/postgresql:${baseVersion}
+                command:
+                  - "/bin/sh"
+                  - "-c"
+                  - "sh /script/script-postgres.sh"
+                securityContext:
+                  privileged: true
+                env:
+                  - name: db_hostname
+                    value: "${db_hostname}"
+                  - name: db_port
+                    value: "${db_port}"
+                  - name: databaseName
+                    value: "${databaseName}"
+                  - name: databaseAdmin
+                    value: "${databaseAdmin}"
+                  - name: db_admin_name
+                    value: "${db_admin_name}"
+                  - name: db_admin_password
+                    value: "${db_admin_password}"
+                  - name: backupInterval
+                    value: "${backupInterval}"
+                  - name: numCopies
+                    value: "${numCopies}"
+                volumeMounts:
+                - name: {{ .Values.congifmap.postgresql.ScriptName }}
+                  mountPath: script/
+                - name: pathbackups
+                  mountPath: {{ .Values.congifmap.postgresql.backupPath }}
+              volumes:
+              - name: {{ .Values.congifmap.postgresql.ScriptName }}
+                configMap:
+                  name: {{ .Values.congifmap.postgresql.ScriptName }}
+                  defaultMode: 0777
+              - name: pathbackups
+                persistentVolumeClaim:
+                    claimName: $pvc_psql_name
+              restartPolicy: Never

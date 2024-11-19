@@ -1,0 +1,84 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.congifmap.clickhouse.cronJob }}
+  labels:
+    app: {{ .Values.congifmap.clickhouse.cronJob }}
+data:
+  cronjob-clickhouse.yaml: |
+    apiVersion: batch/v1
+    kind: CronJob
+    metadata:
+      name: {{ .Values.congifmap.clickhouse.cronJob }}-${name_Custom_Resource}-${databaseName}
+    spec:
+      schedule: "${backupInterval}"
+      jobTemplate:
+        spec:
+          backoffLimit: 0 
+          template:
+            spec:
+              initContainers:
+              - name: copier-container
+                image: kose1n/mc-alpine:latest
+                command:
+                  - "/bin/sh"
+                  - "-c"
+                  - |
+                    cp /usr/local/bin/mc /shared/
+                    echo "mc copied, shutdown..."
+                volumeMounts:
+                - name: shared-volume
+                  mountPath: /shared
+              containers:
+              - name: pg-backup-container
+                image: clickhouse/clickhouse-server:${baseVersion}
+                command:
+                  - "/bin/sh"
+                  - "-c"
+                  - |
+                    sh script/script-clickhouse.sh &&
+                    export PATH="$PATH:/shared"
+                    sh /chcopies/script-ch-copies.sh &&
+                    echo "Extra backups have been deleted"
+                securityContext:
+                  privileged: true
+                env:
+                  - name: db_hostname
+                    value: "${db_hostname}"
+                  - name: db_port
+                    value: "${db_port}"
+                  - name: databaseName
+                    value: "${databaseName}"
+                  - name: db_admin_name
+                    value: "${db_admin_name}"
+                  - name: db_admin_password
+                    value: "${db_admin_password}"
+                  - name: numCopies
+                    value: "${numCopies}"
+                  - name: s3_secret_access_key
+                    value: "${s3_secret_access_key}"
+                  - name: s3_access_key
+                    value: "${s3_access_key}"
+                  - name: s3_bucket
+                    value: "${s3_bucket}"
+                  - name: s3_host
+                    value: "${s3_host}"
+                volumeMounts:
+                - name: {{ .Values.congifmap.clickhouse.ScriptName }}
+                  mountPath: /script
+                - name: shared-volume
+                  mountPath: /shared
+                - name: backup-script-numcopies
+                  mountPath: /chcopies
+              volumes:
+              - name: {{ .Values.congifmap.clickhouse.ScriptName }}
+                configMap:
+                  name: {{ .Values.congifmap.clickhouse.ScriptName }}
+                  defaultMode: 0777
+              - name: shared-volume
+                emptyDir: {}
+              - name: backup-script-numcopies
+                configMap:
+                  name: backup-script-numcopies
+                  defaultMode: 0777
+              restartPolicy: Never

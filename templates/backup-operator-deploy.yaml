@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.deployment.name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Values.labels.app }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.labels.app }}
+    spec:
+      containers:
+      - name: {{ .Values.deployment.name }}
+        image: {{ .Values.images.prefix }}/{{ .Values.deployment.image }}:{{ .Values.images.tag }}
+        imagePullPolicy: {{ .Values.deployment.imagePullPolicy }}
+        volumeMounts:
+        - name: {{ .Values.congifmap.name }}
+          mountPath: /hooks 
+        - name: {{ .Values.congifmap.postgresql.cronJob }}
+          mountPath: /cronjobpsql
+        - name: {{ .Values.congifmap.clickhouse.cronJob }}
+          mountPath: /cronjobclick
+        - name: {{ .Values.congifmap.clickhouse.deployName }}
+          mountPath: /deployclick
+        - name: {{ .Values.congifmap.postgresql.deployName }}
+          mountPath: /deploypsql
+        - name: backup-numcopies
+          mountPath: /ch-copies
+      serviceAccountName: {{ .Values.rbac.name }}
+      volumes:
+      - name: {{ .Values.congifmap.name }}
+        configMap:
+          name: {{ .Values.congifmap.name }}
+          defaultMode: 0777
+      - name: {{ .Values.congifmap.postgresql.cronJob }}
+        configMap:
+          name: {{ .Values.congifmap.postgresql.cronJob }}
+          defaultMode: 0777
+      - name: {{ .Values.congifmap.clickhouse.cronJob }}
+        configMap:
+          name: {{ .Values.congifmap.clickhouse.cronJob }}
+          defaultMode: 0777
+      - name: {{ .Values.congifmap.clickhouse.deployName }}
+        configMap:
+          name: {{ .Values.congifmap.clickhouse.deployName }}
+          defaultMode: 0777
+      - name: {{ .Values.congifmap.postgresql.deployName }}
+        configMap:
+          name: {{ .Values.congifmap.postgresql.deployName }}
+          defaultMode: 0777
+      - name: backup-numcopies
+        configMap:
+          name: backup-script-numcopies
+          defaultMode: 0777
+

@@ -1,0 +1,28 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backup-script-numcopies
+  labels:
+    app: backup-script-numcopies
+data:
+  script-ch-copies.sh: |
+    #!/bin/bash
+
+    BUCKET_NAME="$s3_bucket"
+    DATABASE_NAME="$databaseName"
+    BACKUP_PATH="$BUCKET_NAME/$DATABASE_NAME"
+
+    mc alias set myminio http://$s3_host $s3_access_key $s3_secret_access_key
+ 
+    backups=$(mc ls --versions myminio/$BACKUP_PATH | awk '{print $NF}')
+    backup_count=$(echo "$backups" | wc -l)
+    echo "Initial count of backups: $backup_count"
+    while [ $backup_count -gt $numCopies ]; do
+        oldest_backup=$(echo "$backups" | head -n 1)
+        echo "Deleting extra count of backups starating"
+        echo "Backup $oldest_backup deleting"
+        mc rm --versions --force --recursive myminio/$BACKUP_PATH/$oldest_backup
+        backups=$(echo "$backups" | sed -n '2,$p')
+        backup_count=$(($backup_count - 1))
+    done
+    exit $?

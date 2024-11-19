@@ -1,0 +1,85 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.congifmap.postgresql.ScriptName }}
+  labels:
+    app: {{ .Values.congifmap.postgresql.ScriptName }}
+data:
+  script-postgres.sh: |
+    #!/bin/bash
+
+    check_postgres_connection() {
+      local max_attempts=12
+      local attempt_counter=0
+      echo "_______________________________________________"
+      delay=0
+      while true; do
+        check_connect=$(PGPASSWORD=$1 psql --host $2 -U "$3" -d "$4" -p $5 -t -c "SELECT 1;" 2>&1 | sed -e 's/^[ \t]*//')
+        if echo "$check_connect" | grep -q "server closed the connection unexpectedly"; then
+          delay=5
+          echo "Server closed the connection unexpectedly. Waiting $delay seconds before retrying..."
+        elif echo "$check_connect" | grep -q "Connection refused"; then
+          delay=5
+          echo "Connection refused. Waiting $delay seconds before retrying..."
+        elif [ "$check_connect" != "1" ]; then
+          echo "Error connecting to PostgreSQL: $check_connect"
+          return 1
+        else
+          echo "Successfully connected to PostgreSQL"
+          return 0
+        fi
+
+        if [ $attempt_counter -eq $max_attempts ]; then
+          echo "Failed to connect to PostgreSQL after $max_attempts attempts"
+          return 1
+        fi
+        attempt_counter=$((attempt_counter + 1))
+        sleep $delay
+
+      done
+    }
+
+    check_create_permission() {
+      
+      # можно бы было проверить SELECT через has_table_privilege, но тогда надо с cr указывать имя таблицы для проверки
+
+      if PGPASSWORD="$1" psql --host "$2" -U "$3" -d "$4" -p "$5" -t -A -c "SELECT has_database_privilege('$3', '$4', 'CREATE');" | grep -q 't'; then
+        echo "User has permission on the database. Proceeding with backup..."
+        return 0
+      else
+        echo "Error: User $3 does not have permission on the database."
+        return 1
+      fi
+    }
+
+    create_backup() {
+      backup_dir="{{ .Values.congifmap.postgresql.backupPath }}"
+      backup_file="backup_$4_$(date +%Y-%m-%d_%H-%M-%S).dump"
+      path_backup_file="/$backup_dir/$backup_file"
+
+      # Создаем новый бекап
+      PGPASSWORD=$1 pg_dump -h $2 -U "$3" -p $5 -Fc "$4" > $path_backup_file
+
+      if [ $? -eq 0 ]; then
+        echo "Backup created successfully: $path_backup_file"
+        ls -t /$backup_dir/backup* | awk -v numCopies="$numCopies" 'NR>numCopies {system("rm \"" $0 "\"")}'
+      else
+        echo "Error creating backup"
+        return 1
+      fi
+    }
+
+    if check_postgres_connection "$db_admin_password" "$db_hostname" "$db_admin_name" "$databaseName" "$db_port"; then
+        if check_create_permission "$db_admin_password" "$db_hostname" "$db_admin_name" "$databaseName" "$db_port"; then
+        create_backup "$db_admin_password" "$db_hostname" "$db_admin_name" "$databaseName" "$db_port"
+      else
+        echo "Cannot proceed with backup."
+        return 1
+      fi
+    else
+      echo "Cannot proceed. Failed to connect to PostgreSQL."
+      return 1
+    fi
+    
+    exit $?
+    

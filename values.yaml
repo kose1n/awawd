@@ -1,0 +1,32 @@
+hooks:
+  name: OnCreateResource
+  apiVersion: mobile.dep.com/v1
+crd:
+  name: backup-operator.mobile.dep.com
+  group: mobile.dep.com
+  kind: backup-operator
+congifmap:
+  name: backup-operator-hook-configmap
+  postgresql:
+    deployName: deploy-restore-p
+    cronJob: backup-operator-cronjob-psql
+    ScriptName: backup-operator-script-psql
+    backupPath: "backups"
+  clickhouse:
+    deployName: deploy-restore-ch
+    cronJob: backup-operator-cronjob-ch
+    ScriptName: backup-operator-script-ch
+rbac:
+  api: v1
+  name: backup-operator-account
+  namespace: dev
+  rolename: backup-operator-role
+labels:
+  app: backup-operator
+deployment:
+  name: backup-operator
+  image: "common/db_operator"
+  imagePullPolicy: Always
+images:
+  prefix: "registry2.mobiledep.ru"
+  tag: "v0.0.1"

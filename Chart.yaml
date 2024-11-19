@@ -1,0 +1,4 @@
+apiVersion: v1
+name: backup-operator
+version: 1.0.0
+description: Shell operator CRD monitoring and backup creation

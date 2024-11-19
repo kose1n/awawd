@@ -1,0 +1,60 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.congifmap.clickhouse.deployName }}
+  labels:
+    app: {{ .Values.congifmap.clickhouse.deployName }}
+data:
+  deploy-clickhouse.yaml: |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: restore-click-${databaseName}-${name_Custom_Resource}
+    spec:
+      selector:
+        matchLabels:
+          app: restore-click-${databaseName}-${name_Custom_Resource}
+      template:
+        metadata:
+          labels:
+            app: restore-click-${databaseName}-${name_Custom_Resource}
+        spec:
+          containers:
+          - name: clickhouse-backup
+            image: clickhouse/clickhouse-server:${baseVersion}
+            command:
+              - "/bin/sh"
+              - "-c"
+              - |
+                echo "Creating README file..."
+                cat << EOF > /tmp/README
+                Для восстановления базы необходимо выполнить:
+                ----------------------------------------------------------------------------------------
+                Если таблица существует, её следует удалить перед восстановлением:
+                clickhouse-client -h $db_hostname -u $db_admin_name --port $db_port --password $db_admin_password --query "DROP TABLE <nametable>"
+                ----------------------------------------------------------------------------------------
+                Если таблица или база отсутствует:
+                clickhouse-client -h $db_hostname -u $db_admin_name --port $db_port --password $db_admin_password --query "RESTORE DATABASE $databaseName FROM S3('http://$s3_host/$s3_bucket/$databaseName/<BACKUP_NAME>', '$s3_access_key', '$s3_secret_access_key')"
+                EOF
+                echo "README file created."
+                cat /tmp/README
+                sleep infinity
+            env:
+            - name: db_hostname
+              value: "${db_hostname}"
+            - name: db_port
+              value: "${db_port}"
+            - name: databaseName
+              value: "${databaseName}"
+            - name: db_admin_name
+              value: "${db_admin_name}"
+            - name: db_admin_password
+              value: "${db_admin_password}"
+            - name: s3_secret_access_key
+              value: "${s3_secret_access_key}"
+            - name: s3_access_key
+              value: "${s3_access_key}"
+            - name: s3_bucket
+              value: "${s3_bucket}"
+            - name: s3_host
+              value: "${s3_host}"

@@ -1,0 +1,66 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.congifmap.postgresql.deployName }}
+  labels:
+    app: {{ .Values.congifmap.postgresql.deployName }}
+data:
+  deploy-postgresql.yaml: |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: restore-psql-$databaseName-${name_Custom_Resource}
+    spec:
+      selector:
+        matchLabels:
+          app: restore-psql-$databaseName-${name_Custom_Resource}
+      template:
+        metadata:
+          labels:
+            app: restore-psql-$databaseName-${name_Custom_Resource}
+        spec:
+          containers:
+          - name: postgresql-restore 
+            image: bitnami/postgresql:${baseVersion}
+            command:
+                - "/bin/sh"
+                - "-c"
+                - |
+                  cat << EOF > /tmp/README
+                  --------------------------------------------
+                  Для восстановления базы необходимо выполнить:
+                  ----------------------------------------------------------------------------------------
+                  Если база существует: 
+                    очистит существующую и туда выполнит бекап:
+                          PGPASSWORD=$db_admin_password pg_restore -h $db_hostname -U $db_admin_name -p $db_port -c -d $databaseName /backups/file.dump 
+                  ----------------------------------------------------------------------------------------
+                  Если база отсутствует (нужны права суперпользователя для создания базы данных и пользователя): 
+                    создаст новую базу (при условии что есть superuser):
+                          PGPASSWORD=<PASSWORD-SUPERUSER> pg_restore -h $db_hostname -U <NAME-SUPERUSER> -p $db_port -C -d $databaseAdmin /backups/file.dump 
+                    если и пользователя нет:
+                          PGPASSWORD=<PASSWORD-SUPERUSER> psql --host $db_hostname -U <NAME-SUPERUSER> -d $databaseAdmin -p $db_port -c "CREATE <USER> WITH PASSWORD '<password>';"
+                    если у него нет прав в базу:
+                          PGPASSWORD=<PASSWORD-SUPERUSER> psql --host $db_hostname -U <NAME-SUPERUSER> -d $databaseName -p $5 -c "GRANT ALL ON SCHEMA public to <USER>; GRANT ALL PRIVILEGES ON DATABASE databaseName TO <USER>;" 
+                  EOF
+                  cat /tmp/README
+                  sleep infinity
+            env:
+              - name: db_hostname
+                value: "${db_hostname}"
+              - name: db_port
+                value: "${db_port}"
+              - name: databaseName
+                value: "${databaseName}"
+              - name: databaseAdmin
+                value: "${databaseAdmin}"
+              - name: db_admin_name
+                value: "${db_admin_name}"
+              - name: db_admin_password
+                value: "${db_admin_password}"
+            volumeMounts:
+            - name: pathbackups
+              mountPath: {{ .Values.congifmap.postgresql.backupPath }}
+          volumes:
+          - name: pathbackups
+            persistentVolumeClaim:
+              claimName: ${pvc_psql_name}

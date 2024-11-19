@@ -1,0 +1,24 @@
+apiVersion: mobile.dep.com/v1
+kind: backup-operator
+metadata:
+  name: backup-base
+  namespace: dev
+spec:
+  ################ Database information
+  databaseInfo:
+    databaseName: "diksi"
+    databaseType: "postgresql"
+    backupInterval: "*/30 * * * *"
+    numCopies: 2
+    storage: "2Gi"
+    storageClass: "local-path"
+    baseVersion: "17"
+  ################ Data for the admin
+  databaseConnect:
+    hostname: psql-server-postgresql-0.psql-server-postgresql-hl.default.svc.cluster.local
+    port: 5432
+  adminData:
+    adminCredentials:
+      admindbName: "postgres"
+      username: "anton"
+      password: "123"

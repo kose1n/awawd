@@ -1,0 +1,27 @@
+apiVersion: mobile.dep.com/v1
+kind: backup-operator
+metadata:
+  name: backup-base
+  namespace: dev
+spec:
+  ################ Database information
+  databaseInfo:
+    databaseName: "dns"
+    databaseType: "clickhouse"
+    backupInterval: "*/3 * * * *"
+    numCopies: 2
+    baseVersion: ""
+  ################ Data for the admin 
+  databaseConnect:
+    hostname: clickhouse-server-shard0-0.clickhouse-server-headless.default.svc.cluster.local
+    port: 9000
+  adminData:
+    adminCredentials:
+      username: "admin"
+      password: "123"
+  s3data:
+    host: "minio:9000"
+    bucket: "bucket"
+    accessKey: "7P2nHezJdNQutBHiiqfs"
+    secretAccessKey: "32wL1QC44dEZxO871Kre5RFTAuBh8bl0AsHLSFy4"
+    #4k42W9pDvH

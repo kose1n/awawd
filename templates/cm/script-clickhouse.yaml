@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.congifmap.clickhouse.ScriptName }}
+  labels:
+    app: {{ .Values.congifmap.clickhouse.ScriptName }}
+data:
+  script-clickhouse.sh: |
+    #!/bin/bash
+
+    BACKUP_PATH="$databaseName"
+    BACKUP_NAME="backup-from-$(date +%Y-%m-%d_%H-%M-%S)"
+    
+    create_click_backup() {  
+      clickhouse-client -h $db_hostname -u $db_admin_name --port $db_port --password $db_admin_password --query "BACKUP DATABASE $databaseName TO S3('http://$s3_host/$s3_bucket/$BACKUP_PATH/$BACKUP_NAME', '$s3_access_key', '$s3_secret_access_key')"
+
+      if [ $? -eq 0 ]; then
+        echo "Backup created successfully: $s3_bucket/$BACKUP_PATH/$BACKUP_NAME"
+      else
+        echo "Error creating backup"
+        return 1
+      fi   
+    }
+    create_click_backup
+    exit $?

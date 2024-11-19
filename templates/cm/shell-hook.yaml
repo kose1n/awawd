@@ -1,0 +1,196 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.congifmap.name }}
+  labels:
+    app: {{ .Values.labels.app }}
+data:
+  hook.sh: |
+    #!/usr/bin/env bash
+    ARRAY_COUNT=$(jq -r '. | length-1' $BINDING_CONTEXT_PATH)
+    
+    ########################################## Hook configuration (it keeps track of CRD events that have been added and updated)
+
+    if [[ $1 == "--config" ]]; then
+      cat <<EOF
+    configVersion: v1
+    kubernetes:
+    - name: {{ .Values.hooks.name }}
+      apiVersion: {{ .Values.hooks.apiVersion }}
+      kind: {{ .Values.crd.kind }}
+      executeHookOnEvent:
+      - Added
+      - Modified
+    EOF
+    else
+      # Ignore Synchronization for simplicity
+      type=$(jq -r '.[0].type' $BINDING_CONTEXT_PATH)
+      if [[ $type == "Synchronization" ]]; then
+        echo "Got Synchronization event"
+        exit 0
+      fi
+      
+      ########################################## Parsing variables from a custom resource
+
+      for IND in $(seq 0 $ARRAY_COUNT); do
+        bindingName=$(jq -r ".[$IND].binding" $BINDING_CONTEXT_PATH)
+        resourceEvent=$(jq -r ".[$IND].watchEvent" $BINDING_CONTEXT_PATH)
+
+        if [[ $bindingName == "OnCreateResource" ]]; then
+          if [[ $resourceEvent == "Added" ||  $resourceEvent == "Modified" ]]; then
+            
+            ########################################## Database information
+
+            name_Custom_Resource=$(jq -r ".[$IND].object.metadata.name" $BINDING_CONTEXT_PATH)
+            databaseType=$(jq -r ".[$IND].object.spec.databaseInfo.databaseType" $BINDING_CONTEXT_PATH | tr '[:upper:]' '[:lower:]')
+            db_hostname=$(jq -r ".[$IND].object.spec.databaseConnect.hostname" $BINDING_CONTEXT_PATH)
+            db_port=$(jq -r ".[$IND].object.spec.databaseConnect.port" $BINDING_CONTEXT_PATH)
+
+            databaseName=$(jq -r ".[$IND].object.spec.databaseInfo.databaseName" $BINDING_CONTEXT_PATH)
+            backupInterval=$(jq -r ".[$IND].object.spec.databaseInfo.backupInterval" $BINDING_CONTEXT_PATH)
+            numCopies=$(jq -r ".[$IND].object.spec.databaseInfo.numCopies" $BINDING_CONTEXT_PATH)
+            storage=$(jq -r ".[$IND].object.spec.databaseInfo.storage" $BINDING_CONTEXT_PATH)
+            storageClass=$(jq -r ".[$IND].object.spec.databaseInfo.storageClass" $BINDING_CONTEXT_PATH)
+            baseVersion=$(jq -r ".[$IND].object.spec.databaseInfo.baseVersion" $BINDING_CONTEXT_PATH)
+
+            ########################################## Data for the admin
+
+            db_table=$(jq -r ".[$IND].object.spec.databaseInfo.table" $BINDING_CONTEXT_PATH)
+            databaseAdmin=$(jq -r ".[$IND].object.spec.adminData.adminCredentials.admindbName" $BINDING_CONTEXT_PATH)
+            db_admin_name=$(jq -r ".[$IND].object.spec.adminData.adminCredentials.username" $BINDING_CONTEXT_PATH)
+            db_admin_password=$(jq -r ".[$IND].object.spec.adminData.adminCredentials.password" $BINDING_CONTEXT_PATH)
+
+            ########################################## s3 info
+
+            s3_host=$(jq -r ".[$IND].object.spec.s3data.host" $BINDING_CONTEXT_PATH)
+            s3_bucket=$(jq -r ".[$IND].object.spec.s3data.bucket" $BINDING_CONTEXT_PATH)
+            s3_access_key=$(jq -r ".[$IND].object.spec.s3data.accessKey" $BINDING_CONTEXT_PATH)
+            s3_secret_access_key=$(jq -r ".[$IND].object.spec.s3data.secretAccessKey" $BINDING_CONTEXT_PATH)
+
+
+
+            if [[ $databaseType == "postgresql" || $databaseType == "clickhouse" ]]; then
+              if [[ $databaseType == "postgresql" ]]; then
+                
+                ########################################## Checking for the existence of a secret and piercing the input data
+                
+                check_or_create_pvc() {
+                  local pvc_name="pvc-psql-backup-$databaseName"
+                  local pvc_correct_name=$(echo "$pvc_name" | sed 's/_/-/g') 
+                  local pvc_yaml="$(cat <<EOF
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      name: $pvc_correct_name
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: $storage
+      storageClassName: $storageClass
+    EOF
+                  )"
+                  existing_pvc=$(kubectl get pvc "$pvc_correct_name" -o jsonpath='{.metadata.name}')
+
+                  if [ -z "$existing_pvc" ]; then
+                    echo "Creating PVC..."
+                    echo "$pvc_yaml" | kubectl apply -f -
+                  else
+                    echo "PVC already exists: $existing_pvc"
+                  fi
+                  pvc_psql_name=$pvc_correct_name
+                }
+
+                check_or_create_pvc        
+
+                backupInterval=$backupInterval \
+                numCopies=$numCopies \
+                db_admin_password=$db_admin_password \
+                databaseAdmin=$databaseAdmin \
+                db_admin_name=$db_admin_name \
+                db_hostname=$db_hostname \
+                db_port=$db_port \
+                databaseName=$databaseName \
+                name_Custom_Resource=$name_Custom_Resource \
+                pvc_psql_name=$pvc_psql_name \
+                baseVersion=$baseVersion \
+                envsubst < /cronjobpsql/cronjob-postgres.yaml | kubectl create -f -
+               
+                kubectl create job --from=cronjob/{{ .Values.congifmap.postgresql.cronJob }}-${name_Custom_Resource}-${databaseName} {{ .Values.congifmap.postgresql.cronJob }}-$databaseName-firstjob
+
+                sleep 5 
+                
+                existing_deploy=$(kubectl get deployment restore-psql-$databaseName-${name_Custom_Resource} -o jsonpath='{.metadata.name}')
+                
+                if [ -z "$existing_deploy" ]; then
+                  db_admin_password=$db_admin_password \
+                  databaseAdmin=$databaseAdmin \
+                  db_admin_name=$db_admin_name \
+                  db_hostname=$db_hostname \
+                  db_port=$db_port \
+                  databaseName=$databaseName \
+                  name_Custom_Resource=$name_Custom_Resource \
+                  pvc_psql_name=$pvc_psql_name \
+                  baseVersion=$baseVersion \
+                  envsubst < /deploypsql/deploy-postgresql.yaml | kubectl create -f -
+                  kubectl scale deployment restore-psql-$databaseName-${name_Custom_Resource} --replicas=0
+                else
+                  echo "restore deploy already exists"
+                fi
+                  
+              fi
+    
+              ####################################################################################
+
+              if [[ $databaseType == "clickhouse" ]]; then
+
+                backupInterval=$backupInterval \
+                numCopies=$numCopies \
+                db_admin_password=$db_admin_password \
+                db_admin_name=$db_admin_name \
+                db_hostname=$db_hostname \
+                db_port=$db_port \
+                databaseName=$databaseName \
+                name_Custom_Resource=$name_Custom_Resource \
+                s3_host=$s3_host \
+                s3_bucket=$s3_bucket \
+                s3_access_key=$s3_access_key \
+                s3_secret_access_key=$s3_secret_access_key \
+                baseVersion=$baseVersion \
+                envsubst < /cronjobclick/cronjob-clickhouse.yaml | kubectl create -f -
+
+                kubectl create job --from=cronjob/{{ .Values.congifmap.clickhouse.cronJob }}-${name_Custom_Resource}-${databaseName} {{ .Values.congifmap.clickhouse.cronJob }}-$databaseName-firstjob
+
+                sleep 5
+                
+                existing_deploy=$(kubectl get deployment restore-click-${databaseName}-${name_Custom_Resource} -o jsonpath='{.metadata.name}')
+                
+                if [ -z "$existing_deploy" ]; then
+                  db_admin_password=$db_admin_password \
+                  db_admin_name=$db_admin_name \
+                  db_hostname=$db_hostname \
+                  db_port=$db_port \
+                  databaseName=$databaseName \
+                  name_Custom_Resource=$name_Custom_Resource \
+                  s3_host=$s3_host \
+                  s3_bucket=$s3_bucket \
+                  s3_access_key=$s3_access_key \
+                  s3_secret_access_key=$s3_secret_access_key \
+                  baseVersion=$baseVersion \
+                  envsubst < /deployclick/deploy-clickhouse.yaml | kubectl create -f -
+                  kubectl scale deployment restore-click-${databaseName}-${name_Custom_Resource} --replicas=0
+                else
+                  echo "restore deploy already exists"
+                fi      
+
+              fi
+            fi
+          fi
+        fi
+      done
+    fi
+
+
+
+
